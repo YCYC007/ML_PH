@@ -1,0 +1,169 @@
+---
+title: "ML_project"
+author: "Yizhou Chen"
+date: "4/24/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ggpubr)
+library(randomForest)
+library(MASS)
+library(ROSE)
+library(ROCR)
+library(ggpubr)
+library(ggplot2)
+```
+
+read in dataset
+```{r cars}
+load("F:/Google Drive/ML in PH/final/newdata1.Rdata")
+data <- newdata1
+data <- data %>%
+  mutate(age = as.numeric(age)) %>%
+  mutate(id = as.numeric(id)) %>%
+  mutate(PF = factor(PF, ordered = FALSE))
+
+```
+
+check missing value
+```{r}
+gg_miss_var(data, show_pct = TRUE)
+
+```
+
+splitting dataset
+```{r}
+set.seed(0)
+train <- sample(nrow(data), nrow(data) * 0.5)
+test_set <- data[-train, ]
+train_set <- data[train, ]
+
+```
+
+
+```{r pressure, echo=FALSE}
+set.seed(0)
+rf <- randomForest(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+                   data = data, 
+                   subset = train, 
+                   importance=TRUE
+                   )
+
+
+yhat.rf <- predict(rf, newdata = test_set)
+train_y <- predict(rf, newdata = train_set)
+
+#training error
+confusionMatrix(train_set$depression, train_y)
+
+#testing error
+confusionMatrix(test_set$depression, yhat.rf)
+
+importance(rf)
+varImpPlot(rf)
+```
+
+Using logistic regression to make prediction
+```{r}
+lr <- glm(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+          data = train_set,
+          family = "binomial"
+          )
+
+pred <- predict(lr, newdata = test_set, type = "response")
+lr.pred <- prediction(pred, test_set$depression)
+
+trade_off <- performance(prediction.obj = lr.pred, measure="sens", x.measure="spec")
+plot(trade_off)
+
+ROC( form = y ~ x + z , plot="sp" )
+
+#get optimal probability
+trade_off@alpha.values[[1]][which.max(trade_off@x.values[[1]]+trade_off@y.values[[1]])]
+# [1] 0.6862458
+
+#make predictions use the optimal probability
+log.predict <- rep(1, nrow(test_set))
+log.predict[pred > 0.6862458] <- 2
+log.predict <- factor(log.predict, labels = c("no depression", "depression"))
+```
+
+Using different over sampling strategy to counter for imbalanced data.
+
+```{r}
+#creating combination of over- and under-sampling and ROSE function to generate new data
+set.seed(0)
+
+data.balance.both <- ovun.sample(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+                                 data = train_set, 
+                                 method = "both", 
+                                 p=0.5, 
+                                 seed = 1)$data
+
+data.balance.ROSE <- ROSE(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+                          data = train_set, 
+                          seed = 1)$data
+
+#fit random forest on the new data
+rf.both <- randomForest(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+                   data = data.balance.both,
+                   importance=TRUE
+                   )
+
+rf.ROSE <- randomForest(depression ~ age + sex + race + educ + marital + living + SR + smoke + alcohol + PF, 
+                   data = data.balance.ROSE,
+                   importance=TRUE
+                   )
+
+#make predictions on the new random forest
+yhat.rf.both <- predict(rf.both, newdata = test_set)
+yhat.rf.ROSE <- predict(rf.ROSE, newdata = test_set)
+
+```
+
+Calculate test accuracy and making ROC curves
+```{r}
+#testing error by confusion matrix
+confusionMatrix(test_set$depression, log.predict)
+confusionMatrix(test_set$depression, yhat.rf)
+confusionMatrix(test_set$depression, yhat.rf.both)
+confusionMatrix(test_set$depression, yhat.rf.ROSE)
+#logistic regression: 91.52% CI(89.19% - 93.50%)
+#random forest without resampling: 91.67% CI(89.34% - 93.63%)
+#random forest with both over and under sampling: 86.55% CI(83.76% - 89.02%)
+#random forest with ROSE function resampling: 84.65% CI(81.73% - 87.27%)
+
+#calculated AUC 
+
+#AUC for logistic regression with optimal threshold
+roc.curve(test_set$depression, log.predict)#LR with AUC = 0.502
+
+#AUC for normal random forest
+roc.curve(test_set$depression, yhat.rf)#rf with AUC = 0.515
+
+#AUC for both sampling random forest
+roc.curve(test_set$depression, yhat.rf.both)#rf with both under and over AUC = 0.691
+
+#AUC for ROSE random forest
+roc.curve(test_set$depression, yhat.rf.ROSE)#rf with ROSE resamplinmg AUC = 0.697
+```
+
+
+
+
+
+
+
+
+
+
+
+
